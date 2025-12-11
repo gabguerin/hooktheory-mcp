@@ -6,11 +6,14 @@ A Model Context Protocol (MCP) server that enables AI agents to interact with th
 
 Get up and running in 3 simple steps:
 
-1. **Get your API key** from [Hooktheory API](https://www.hooktheory.com/api/trends/docs)
+1. **Set up authentication** using your Hooktheory account credentials:
+   ```bash
+   export HOOKTHEORY_USERNAME="your-username"
+   export HOOKTHEORY_PASSWORD="your-password"
+   ```
 
 2. **Install and run:**
    ```bash
-   export HOOKTHEORY_API_KEY="your-api-key-here"
    uvx hooktheory-mcp
    ```
 
@@ -59,7 +62,7 @@ The server provides the following tools for music analysis and generation:
 ### Prerequisites
 
 - Python 3.11 or higher
-- A Hooktheory API key (Get one at https://www.hooktheory.com/api/trends/docs)
+- A Hooktheory account (Sign up at https://www.hooktheory.com)
 
 ### Setup
 
@@ -75,14 +78,16 @@ The server provides the following tools for music analysis and generation:
    uv sync
    ```
 
-3. **Set up your API key:**
+3. **Set up authentication:**
    ```bash
-   export HOOKTHEORY_API_KEY="your-api-key-here"
+   export HOOKTHEORY_USERNAME="your-username"
+   export HOOKTHEORY_PASSWORD="your-password"
    ```
 
    Or create a `.env` file:
    ```
-   HOOKTHEORY_API_KEY=your-api-key-here
+   HOOKTHEORY_USERNAME=your-username
+   HOOKTHEORY_PASSWORD=your-password
    ```
 
 4. **Test the installation:**
@@ -127,7 +132,8 @@ For Claude Desktop, add this to your configuration:
       "command": "uvx",
       "args": ["hooktheory-mcp"],
       "env": {
-        "HOOKTHEORY_API_KEY": "your-api-key-here"
+        "HOOKTHEORY_USERNAME": "your-username",
+        "HOOKTHEORY_PASSWORD": "your-password"
       }
     }
   }
@@ -143,7 +149,8 @@ For Claude Desktop, add this to your configuration:
       "args": ["run", "hooktheory-mcp"],
       "cwd": "/path/to/hooktheory-mcp",
       "env": {
-        "HOOKTHEORY_API_KEY": "your-api-key-here"
+        "HOOKTHEORY_USERNAME": "your-username",
+        "HOOKTHEORY_PASSWORD": "your-password"
       }
     }
   }
@@ -221,11 +228,20 @@ Generate a 4-chord pop progression in A minor
 
 ## API Integration
 
-The server integrates with the Hooktheory API endpoints:
+The server integrates with the Hooktheory API using OAuth 2.0 authentication:
 
-- **Base URL**: `https://www.hooktheory.com/api/trends`
-- **Authentication**: Bearer token via `Authorization` header
-- **Rate Limiting**: Follows Hooktheory API limits
+- **Base URL**: `https://www.hooktheory.com/api`
+- **Authentication**: OAuth 2.0 with username/password → Bearer token
+- **Rate Limiting**: 1.5 requests/second with exponential backoff
+- **Token Management**: Automatic token caching and refresh (24-hour expiry)
+- **Error Recovery**: Automatic retry with backoff on rate limits and auth failures
+
+### Authentication Flow
+
+1. Server exchanges username/password for Bearer token via `POST /users/auth`
+2. Token is cached and automatically refreshed when expired
+3. All API requests use Bearer token authentication
+4. Rate limiting prevents exceeding API limits with intelligent backoff
 
 ## Development
 
@@ -275,19 +291,25 @@ asyncio.run(hooktheory_client._make_request('test'))
 
 ### Common Issues
 
-1. **API Key Not Set**
+1. **Authentication Credentials Not Set**
    ```
-   Error: HOOKTHEORY_API_KEY environment variable is required
+   Error: HOOKTHEORY_USERNAME and HOOKTHEORY_PASSWORD environment variables are required
    ```
-   Solution: Set the `HOOKTHEORY_API_KEY` environment variable
+   Solution: Set both `HOOKTHEORY_USERNAME` and `HOOKTHEORY_PASSWORD` environment variables
 
 2. **HTTP 401 Unauthorized**
    ```
    HTTP error calling https://www.hooktheory.com/api/trends/...: 401
    ```
-   Solution: Verify your API key is correct and active
+   Solution: Verify your username and password are correct. The server will automatically retry authentication.
 
-3. **Connection Errors**
+3. **Rate Limited (HTTP 429)**
+   ```
+   Rate limited. Waiting X seconds before retry
+   ```
+   Solution: This is normal - the server automatically handles rate limiting with exponential backoff
+
+4. **Connection Errors**
    ```
    HTTP error calling https://www.hooktheory.com/api/trends/...: ConnectError
    ```

@@ -5,51 +5,203 @@ A Model Context Protocol server that enables agents to query the Hooktheory API
 for chord progression generation, song analysis, and music theory data.
 """
 
+import asyncio
 import logging
 import os
+import time
 from typing import Any, Dict, Optional
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create the MCP server
 mcp = FastMCP("Hooktheory MCP Server")
 
 
-class HooktheoryClient:
-    """Client for interacting with the Hooktheory API."""
+class RateLimiter:
+    """Simple rate limiter with exponential backoff."""
 
-    def __init__(self, base_url: str = "https://www.hooktheory.com/api/trends"):
+    def __init__(self, max_requests_per_second: float = 2.0):
+        self.max_requests_per_second = max_requests_per_second
+        self.min_interval = 1.0 / max_requests_per_second
+        self.last_request_time = 0.0
+        self.backoff_delay = 0.0
+        self.consecutive_failures = 0
+
+    async def wait(self):
+        """Wait if necessary to respect rate limits."""
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+
+        # Apply backoff delay if we have consecutive failures
+        total_delay = max(self.min_interval - time_since_last, self.backoff_delay)
+
+        if total_delay > 0:
+            await asyncio.sleep(total_delay)
+
+        self.last_request_time = time.time()
+
+    def on_success(self):
+        """Reset backoff on successful request."""
+        self.consecutive_failures = 0
+        self.backoff_delay = 0.0
+
+    def on_failure(self):
+        """Increase backoff delay on failed request."""
+        self.consecutive_failures += 1
+        # Exponential backoff: 1s, 2s, 4s, 8s, max 60s
+        self.backoff_delay = min(60.0, 2 ** (self.consecutive_failures - 1))
+
+
+class HooktheoryClient:
+    """Client for interacting with the Hooktheory API with OAuth 2 authentication."""
+
+    def __init__(self, base_url: str = "https://www.hooktheory.com/api"):
         self.base_url = base_url
-        self.api_key = os.getenv("HOOKTHEORY_API_KEY")
+        self.trends_base_url = f"{base_url}/trends"
+        self.username = os.getenv("HOOKTHEORY_USERNAME")
+        self.password = os.getenv("HOOKTHEORY_PASSWORD")
+
+        # Token management
+        self.access_token: Optional[str] = None
+        self.user_id: Optional[int] = None
+        self.token_expires_at: Optional[float] = None
+
+        # Rate limiting
+        self.rate_limiter = RateLimiter(
+            max_requests_per_second=1.5
+        )  # Conservative rate
+
+    async def _authenticate(self) -> Dict[str, Any]:
+        """Authenticate with Hooktheory API using username/password."""
+        if not self.username or not self.password:
+            raise ValueError(
+                "HOOKTHEORY_USERNAME and HOOKTHEORY_PASSWORD environment variables are required"
+            )
+
+        auth_url = f"{self.base_url}/users/auth"
+        auth_data = {"username": self.username, "password": self.password}
+
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info("Authenticating with Hooktheory API")
+                response = await client.post(auth_url, json=auth_data)
+                response.raise_for_status()
+
+                auth_response = response.json()
+                logger.info(
+                    f"Authentication successful for user: {auth_response.get('username')}"
+                )
+                return auth_response
+
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Authentication failed: HTTP {e.response.status_code}")
+                if e.response.status_code == 401:
+                    raise ValueError("Invalid username or password")
+                raise
+            except httpx.RequestError as e:
+                logger.error(f"Request error during authentication: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error during authentication: {e}")
+                raise
+
+    async def _ensure_authenticated(self):
+        """Ensure we have a valid access token."""
+        # Check if we already have a valid token
+        if (
+            self.access_token
+            and self.token_expires_at
+            and time.time() < self.token_expires_at
+        ):
+            return
+
+        # Authenticate and get new token
+        auth_response = await self._authenticate()
+        self.access_token = auth_response["activkey"]
+        self.user_id = auth_response.get("id")
+
+        # Set expiration time (assume 24 hours if not specified)
+        self.token_expires_at = time.time() + (24 * 60 * 60)
+
+        logger.info("Access token updated successfully")
 
     async def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Make an authenticated request to the Hooktheory API."""
-        if not self.api_key:
-            raise ValueError("HOOKTHEORY_API_KEY environment variable is required")
+        """Make an authenticated request to the Hooktheory API with rate limiting."""
+
+        # Ensure we have a valid token
+        await self._ensure_authenticated()
+
+        # Apply rate limiting
+        await self.rate_limiter.wait()
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "Hooktheory-MCP-Server/0.1.0",
+            "Authorization": f"Bearer {self.access_token}",
+            "User-Agent": "Hooktheory-MCP-Server/0.2.0",
+            "Content-Type": "application/json",
         }
 
-        url = f"{self.base_url}/{endpoint}"
+        url = f"{self.trends_base_url}/{endpoint}"
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             try:
+                logger.debug(f"Making request to {url} with params: {params}")
                 response = await client.get(url, headers=headers, params=params or {})
+
+                if response.status_code == 429:
+                    # Rate limited - apply backoff
+                    self.rate_limiter.on_failure()
+                    retry_after = int(response.headers.get("Retry-After", "60"))
+                    logger.warning(
+                        f"Rate limited. Waiting {retry_after} seconds before retry"
+                    )
+                    await asyncio.sleep(retry_after)
+
+                    # Retry once after rate limit
+                    await self.rate_limiter.wait()
+                    response = await client.get(
+                        url, headers=headers, params=params or {}
+                    )
+
+                if response.status_code == 401:
+                    # Token might be expired, force re-authentication
+                    logger.info("Received 401, forcing re-authentication")
+                    self.access_token = None
+                    self.token_expires_at = None
+                    await self._ensure_authenticated()
+
+                    # Update headers with new token
+                    headers["Authorization"] = f"Bearer {self.access_token}"
+
+                    # Retry with new token
+                    await self.rate_limiter.wait()
+                    response = await client.get(
+                        url, headers=headers, params=params or {}
+                    )
+
                 response.raise_for_status()
-                return response.json()
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error calling {url}: {e}")
+                self.rate_limiter.on_success()
+
+                result = response.json()
+                logger.debug(
+                    f"Request successful: {len(str(result))} characters returned"
+                )
+                return result
+
+            except httpx.HTTPStatusError as e:
+                self.rate_limiter.on_failure()
+                logger.error(f"HTTP {e.response.status_code} error calling {url}: {e}")
+                raise
+            except httpx.RequestError as e:
+                self.rate_limiter.on_failure()
+                logger.error(f"Request error calling {url}: {e}")
                 raise
             except Exception as e:
+                self.rate_limiter.on_failure()
                 logger.error(f"Unexpected error calling {url}: {e}")
                 raise
 
@@ -171,7 +323,11 @@ async def find_similar_songs(
     """
     try:
         # Search for similar progressions (this would require the actual API structure)
-        params: Dict[str, Any] = {"artist": artist, "song": song, "threshold": similarity_threshold}
+        params: Dict[str, Any] = {
+            "artist": artist,
+            "song": song,
+            "threshold": similarity_threshold,
+        }
 
         result = await hooktheory_client._make_request("similar", params)
         return str(result)
@@ -224,17 +380,28 @@ def main():
         help="Transport mechanism (default: stdio)",
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port for web-based transports (default: 8000)"
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for web-based transports (default: 8000)",
     )
 
     args = parser.parse_args()
 
-    # Check for API key
-    if not os.getenv("HOOKTHEORY_API_KEY"):
+    # Check for authentication credentials
+    username = os.getenv("HOOKTHEORY_USERNAME")
+    password = os.getenv("HOOKTHEORY_PASSWORD")
+
+    if not username or not password:
         logger.warning(
-            "HOOKTHEORY_API_KEY environment variable not set. API calls will fail."
+            "Authentication credentials not found. Please set "
+            "HOOKTHEORY_USERNAME and HOOKTHEORY_PASSWORD environment variables"
         )
-        print("Warning: Please set HOOKTHEORY_API_KEY environment variable")
+        print("Warning: Authentication required. Please set:")
+        print("  - HOOKTHEORY_USERNAME")
+        print("  - HOOKTHEORY_PASSWORD")
+    else:
+        logger.info("Using OAuth 2.0 authentication with username/password")
 
     if args.transport == "stdio":
         print("Starting Hooktheory MCP Server with stdio transport")
