@@ -1,0 +1,39 @@
+[project]
+name = "hooktheory-mcp"
+version = "0.1.0"
+description = "Model Context Protocol server for Hooktheory API integration - enables agents to query chord progressions and music theory data"
+readme = "README.md"
+authors = [
+    { name = "Gabriel Guerin", email = "gabriel.guerin.a@gmail.com" }
+]
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["mcp", "model-context-protocol", "hooktheory", "music", "chords", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "mcp>=1.23.3",
+    "httpx>=0.28.0",
+    "pydantic>=2.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/gabguerin/hooktheory-mcp"
+Repository = "https://github.com/gabguerin/hooktheory-mcp"
+Documentation = "https://github.com/gabguerin/hooktheory-mcp#readme"
+Issues = "https://github.com/gabguerin/hooktheory-mcp/issues"
+
+[project.scripts]
+hooktheory-mcp = "hooktheory_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.8.24,<0.9.0"]
+build-backend = "uv_build"
