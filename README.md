@@ -2,6 +2,48 @@
 
 A Model Context Protocol (MCP) server that enables AI agents to interact with the Hooktheory API for chord progression generation, song analysis, and music theory data retrieval.
 
+## Quick Start
+
+Get up and running in 3 simple steps:
+
+1. **Get your API key** from [Hooktheory API](https://www.hooktheory.com/api/trends/docs)
+
+2. **Install and run:**
+   ```bash
+   export HOOKTHEORY_API_KEY="your-api-key-here"
+   uvx hooktheory-mcp
+   ```
+
+3. **Try these examples with your AI assistant:**
+   - "Find songs with the chord progression I-V-vi-IV"
+   - "Analyze the song 'Wonderwall' by Oasis"
+   - "Show me popular chord progressions in C major"
+   - "Find songs similar to 'Let It Be' by The Beatles"
+
+That's it! Your AI can now access music theory data and chord progressions.
+
+## Common Usage Examples
+
+### Search for Songs by Chord Progression
+```
+Find songs using the progression 1,5,6,4 in the key of C major
+```
+
+### Analyze Any Song
+```
+What are the chords in "Someone Like You" by Adele?
+```
+
+### Discover Popular Progressions
+```
+What are the most common chord progressions in pop music?
+```
+
+### Find Similar Songs
+```
+Find songs that have similar chord progressions to "Hotel California"
+```
+
 ## Features
 
 The server provides the following tools for music analysis and generation:
@@ -76,8 +118,23 @@ uvx hooktheory-mcp --transport sse
 
 ### MCP Client Configuration
 
-Add this to your MCP client configuration (e.g., Claude Desktop):
+For Claude Desktop, add this to your configuration:
 
+```json
+{
+  "mcpServers": {
+    "hooktheory": {
+      "command": "uvx",
+      "args": ["hooktheory-mcp"],
+      "env": {
+        "HOOKTHEORY_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+**Alternative for development/local install:**
 ```json
 {
   "mcpServers": {
