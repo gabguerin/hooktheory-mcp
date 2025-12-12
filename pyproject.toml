@@ -1,6 +1,6 @@
 [project]
 name = "hooktheory-mcp"
-version = "0.2.2"
+version = "0.2.3"
 description = "Model Context Protocol server for Hooktheory API integration - enables agents to query chord progressions and music theory data"
 readme = "README.md"
 authors = [{ name = "Gabriel Guerin", email = "gabriel.guerin.a@gmail.com" }]

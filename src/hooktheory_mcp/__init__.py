@@ -2,7 +2,11 @@
 Hooktheory MCP Server
 
 A Model Context Protocol server that enables agents to query the Hooktheory API
-for chord progression generation, song analysis, and music theory data.
+for chord progression data and music theory statistics.
+
+Available tools:
+- get_songs_by_progression: Find songs that contain specific chord progressions
+- get_chord_transitions: Get chord statistics and transition probabilities
 """
 
 import asyncio
@@ -141,7 +145,7 @@ class HooktheoryClient:
 
         headers = {
             "Authorization": f"Bearer {self.access_token}",
-            "User-Agent": "Hooktheory-MCP-Server/0.2.0",
+            "User-Agent": "Hooktheory-MCP-Server/0.2.2",
             "Content-Type": "application/json",
         }
 
@@ -211,87 +215,66 @@ hooktheory_client = HooktheoryClient()
 
 
 @mcp.tool()
-async def get_chord_progressions(
+async def get_songs_by_progression(
     cp: str,
+    page: int = 1,
     key: Optional[str] = None,
     mode: Optional[str] = None,
-    artist: Optional[str] = None,
-    song: Optional[str] = None,
 ) -> str:
     """
-    Get chord progressions and related songs from Hooktheory.
+    Get songs that contain a specific chord progression from Hooktheory.
 
     Args:
-        cp: Chord progression in Roman numeral notation (e.g., "1,5,6,4")
-        key: Musical key (e.g., "C", "Am")
-        mode: Scale mode (e.g., "major", "minor")
-        artist: Filter by artist name
-        song: Filter by song title
+        cp: Chord progression using comma-separated chord IDs (e.g., "1,5,6,4" for I-V-vi-IV, "4,1" for IV-I)
+        page: Page number for pagination (default: 1, each page contains ~20 results)
+        key: Musical key filter (e.g., "C", "Am")
+        mode: Scale mode filter (e.g., "major", "minor")
 
     Returns:
-        JSON string containing chord progression data and similar songs
+        JSON string containing array of songs with artist, song, section, and URL
     """
     try:
         params: Dict[str, Any] = {"cp": cp}
+        if page > 1:
+            params["page"] = page
         if key:
             params["key"] = key
         if mode:
             params["mode"] = mode
-        if artist:
-            params["artist"] = artist
-        if song:
-            params["song"] = song
 
         result = await hooktheory_client._make_request("songs", params)
         return str(result)
 
     except Exception as e:
-        error_msg = f"Error fetching chord progressions: {str(e)}"
+        error_msg = f"Error fetching songs with progression {cp}: {str(e)}"
         logger.error(error_msg)
         return error_msg
 
 
 @mcp.tool()
-async def analyze_song(artist: str, song: str) -> str:
-    """
-    Analyze a specific song to get its chord progression, key, and music theory data.
-
-    Args:
-        artist: Artist name
-        song: Song title
-
-    Returns:
-        JSON string containing song analysis including chords, key, and structure
-    """
-    try:
-        params: Dict[str, Any] = {"artist": artist, "song": song}
-
-        result = await hooktheory_client._make_request("songs/search", params)
-        return str(result)
-
-    except Exception as e:
-        error_msg = f"Error analyzing song '{song}' by {artist}: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
-
-
-@mcp.tool()
-async def get_popular_progressions(
-    key: Optional[str] = None, mode: Optional[str] = None, limit: int = 20
+async def get_chord_transitions(
+    cp: Optional[str] = None,
+    key: Optional[str] = None,
+    mode: Optional[str] = None,
 ) -> str:
     """
-    Get the most popular chord progressions from the Hooktheory database.
+    Get chord statistics and transition probabilities from Hooktheory database.
 
     Args:
-        key: Filter by musical key (e.g., "C", "Am")
-        mode: Filter by scale mode ("major" or "minor")
-        limit: Maximum number of results to return (default: 20)
+        cp: Optional chord progression to get transitions from (e.g., "4" for chords after IV, "4,1" for chords after IV-I)
+            If not provided, returns overall chord frequency statistics
+        key: Musical key filter (e.g., "C", "Am")
+        mode: Scale mode filter ("major" or "minor")
 
     Returns:
-        JSON string containing popular chord progressions and their usage statistics
+        JSON string containing chord nodes with chord_ID, chord_HTML (Roman numeral), probability, and child_path
+        - Without cp: Shows overall chord frequencies (I=18.9%, IV=17.2%, etc.)
+        - With cp: Shows what chords follow the progression (e.g., after IV: I=32.4%, V=28.9%)
     """
     try:
-        params: Dict[str, Any] = {"limit": limit}
+        params: Dict[str, Any] = {}
+        if cp:
+            params["cp"] = cp
         if key:
             params["key"] = key
         if mode:
@@ -301,69 +284,7 @@ async def get_popular_progressions(
         return str(result)
 
     except Exception as e:
-        error_msg = f"Error fetching popular progressions: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
-
-
-@mcp.tool()
-async def find_similar_songs(
-    artist: str, song: str, similarity_threshold: float = 0.7
-) -> str:
-    """
-    Find songs with similar chord progressions to a given song.
-
-    Args:
-        artist: Artist name of the reference song
-        song: Title of the reference song
-        similarity_threshold: Similarity score threshold (0.0 to 1.0)
-
-    Returns:
-        JSON string containing similar songs and their similarity scores
-    """
-    try:
-        # Search for similar progressions (this would require the actual API structure)
-        params: Dict[str, Any] = {
-            "artist": artist,
-            "song": song,
-            "threshold": similarity_threshold,
-        }
-
-        result = await hooktheory_client._make_request("similar", params)
-        return str(result)
-
-    except Exception as e:
-        error_msg = f"Error finding songs similar to '{song}' by {artist}: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
-
-
-@mcp.tool()
-async def generate_progression(
-    key: str = "C", mode: str = "major", length: int = 4, style: Optional[str] = None
-) -> str:
-    """
-    Generate a chord progression based on music theory patterns from Hooktheory data.
-
-    Args:
-        key: Starting key for the progression (e.g., "C", "Am")
-        mode: Scale mode ("major" or "minor")
-        length: Number of chords in the progression
-        style: Musical style/genre hint (e.g., "pop", "rock", "jazz")
-
-    Returns:
-        JSON string containing the generated chord progression with probabilities
-    """
-    try:
-        params: Dict[str, Any] = {"key": key, "mode": mode, "length": length}
-        if style:
-            params["style"] = style
-
-        result = await hooktheory_client._make_request("generate", params)
-        return str(result)
-
-    except Exception as e:
-        error_msg = f"Error generating chord progression: {str(e)}"
+        error_msg = f"Error fetching chord transitions{' for ' + cp if cp else ''}: {str(e)}"
         logger.error(error_msg)
         return error_msg
 
