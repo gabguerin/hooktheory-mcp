@@ -58,7 +58,7 @@ class RateLimiter:
 class HooktheoryClient:
     """Client for interacting with the Hooktheory API with OAuth 2 authentication."""
 
-    def __init__(self, base_url: str = "https://www.hooktheory.com/api"):
+    def __init__(self, base_url: str = "https://api.hooktheory.com/v1"):
         self.base_url = base_url
         self.trends_base_url = f"{base_url}/trends"
         self.username = os.getenv("HOOKTHEORY_USERNAME")
@@ -87,7 +87,7 @@ class HooktheoryClient:
         async with httpx.AsyncClient() as client:
             try:
                 logger.info("Authenticating with Hooktheory API")
-                response = await client.post(auth_url, json=auth_data)
+                response = await client.post(auth_url, data=auth_data)
                 response.raise_for_status()
 
                 auth_response = response.json()
